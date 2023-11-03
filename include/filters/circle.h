@@ -3,7 +3,7 @@
 #include "graphicsLibrary/include/texture.h"
 
 namespace filter{
-    void circle(graphics::Image &img, uint32_t fill, uint32_t stroke, uint32_t strokeWeight, int8_t noise, bool bg, uint32_t bgColor = 0){
+    void circle(graphics::Image &img, uint32_t fill, uint32_t stroke, uint32_t strokeWeight, bool bg, uint32_t bgColor = 0){
         uint32_t *buf = img.buffer32;
         double fs = 0.5f*(double)strokeWeight/std::sqrt(img.width*img.height);
         for(int i=0;i<img.width;++i){
