@@ -6,8 +6,6 @@
 #include <GLFW/glfw3.h>
 #include "glm.hpp"
 #include "gtc/matrix_transform.hpp"
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb/stb_image_write.h"
 
 #include "graphicsLibrary/include/shader.h"
 #include "graphicsLibrary/include/texture.h"
@@ -19,15 +17,9 @@
 #include "filters/noise.h"
 
 #include "controls.h"
+#include "image.h"
 
-struct rgba{
-    uint8_t r, g, b, a;
-    operator const uint32_t() const {return *(const uint32_t*)this;}
-    bool equals(const rgba &col, uint8_t tr, uint8_t tg, uint8_t tb, uint8_t ta = 255) const {
-        uint8_t dr = std::abs((int16_t)this->r - (int16_t)col.r), dg = std::abs((int16_t)this->g - (int16_t)col.g), db = std::abs((int16_t)this->b - (int16_t)col.b), da = std::abs((int16_t)this->a - (int16_t)col.a);
-        return dr < tr && dg < tg && db < tb && da < ta;
-    }
-};
+
 
 constexpr float RADIUS = 1.0f;
 constexpr rgba PAD_COLOR = rgba{0,10,150,255};
@@ -181,7 +173,7 @@ int main(){
         {
             glReadPixels(0,0,950,950,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
 
-            int maxX = 0, minX = 950, maxY = 0, minY = 0;
+            uint32_t maxX = 0, minX = 950, maxY = 0, minY = 0;
             bool b = false;
             for(int x=0;x<950 && !b;++x){
                 for(int y=0;y<950 && !b;++y){
@@ -223,112 +215,62 @@ int main(){
                 }
             }
 
-            int dx = maxX - minX;
-            int dy = maxY - minY;
+            uint32_t dx = maxX - minX;
+            uint32_t dy = maxY - minY;
 
             double calculatedDistance = 0.0;
             int accuracy = 0;
 
-            if(dx > 0 && dy > 0){
-                rgba *padSection = new rgba[dy*dx];
-                // Copy subsection with just landing pad
-                for(int y=0;y<dy;++y){
-                    memcpy(padSection+y*dx,pixels+(y+minY)*950+minX,dx*4);
-                }
+            while(dx > 0 && dy > 0){
+                accuracy = 1;
+                Image padSection = Image(pixels,{minX,minY},{maxX,maxY}, 950);
 
-                // Find diameters
-                int cx = dx/2, cy = dy/2;
-                int lx = cx, ly = dy-1;
-                bool fail = false;
+                //Find top of landing pad
+                point centerTop;
+                if(!padSection.linearSearch({dx/2,0},{0,1},centerTop,PAD_COLOR,TOLERANCE,{0,0,0,0})){break;}
 
-                // Find top of landing pad
-                while(!padSection[lx + (--ly)*dx].equals(PAD_COLOR,TOLERANCE,TOLERANCE,TOLERANCE)){
-                    padSection[lx + ly*dx] = {255,0,0,255};
-                    if(ly<=1){
-                        fail = true;
-                        break;
-                    }
-                }
-                padSection[lx + ly*dx] = {255,0,0,255};
-                if(ly == 0){
-                    fail = true;
-                }
-                if(!fail){
-                    // Determine whether left is major or minor axis
-                    bool lMajor;
-                    fail = true;
-                    while(--lx > 0){
-                        if(!padSection[lx + ly*dx].equals(PAD_COLOR,TOLERANCE,TOLERANCE,TOLERANCE)){
-                            lMajor = false;
-                            break;
-                        }
-                        if(padSection[lx + (ly-1)*dx].equals(PAD_COLOR,TOLERANCE,TOLERANCE,TOLERANCE)){
-                            lMajor = true;
-                            break;
-                        }
-                        padSection[lx + ly*dx] = {255,255,0,255};
-                    }
-                    padSection[lx + ly*dx] = {255,255,0,255};
-                    int rx = cx, ry = ly;
-                    double longestSQ = 0.0, shortestSQ = 950.0*950.0;
-                    int count = 0;
+                //Find direction of major
+                bool rMajor;
+                if(!padSection.xDirOfMax(centerTop,rMajor,PAD_COLOR,BORDER_COLOR,TOLERANCE,{0,0,0,0})){break;}
+                    
+                //Approximate first major radius
+                point center = {dx/2,dy/2};
+                float radiusSquared;
+                point major1;
+                int checkCount = (padSection.width+padSection.height)/20;
+                if(!padSection.traceBorder(centerTop,center,rMajor,false,checkCount,major1,radiusSquared,BORDER_COLOR,TOLERANCE,{0,0,0,0})){break;}
 
-                    int &majorX = lMajor?lx:rx, &majorY = lMajor?ly:ry, &minorX = lMajor?rx:lx, &minorY = lMajor?ry:ly;
+                //Approximate second major radius
+                point major2Guess = {dx-major1.x,dy-major1.y};
 
-                    // Find major diameter
-                    padSection[cx + cy*dx] = {255,255,255,255};
-                    int h = 0;
-                    while(majorX > 0 && majorX < dx-1 && count < 5){
-                        majorX += lMajor?1:-1;
-                        if(padSection[majorX + (majorY+h)*dx].equals(PAD_COLOR,TOLERANCE,TOLERANCE,TOLERANCE)){
-                            while(majorY+h < dy-1 && padSection[majorX + (majorY+(++h))*dx].equals(PAD_COLOR,TOLERANCE,TOLERANCE,TOLERANCE)){
-                                padSection[majorX + (majorY+h)*dx] = {255,0,255,255};
-                                double dist = (majorX-cx)*(majorX-cx)+(majorY-cy)*(majorY-cy);
-                                if(dist>longestSQ){
-                                    longestSQ=dist;
-                                    count = 0;
-                                }else{
-                                    if(++count > 5){
-                                        break;
-                                    }
-                                }
-                            }
-                            --h;
-                        }else{
-                            while(majorY+h > 0 &&  !padSection[majorX + (majorY+(--h))*dx].equals(PAD_COLOR,TOLERANCE,TOLERANCE,TOLERANCE)){
-                                padSection[majorX + (majorY+h)*dx] = {255,0,255,255};
-                                double dist = (majorX-cx)*(majorX-cx)+(majorY-cy)*(majorY-cy);
-                                if(dist>longestSQ){
-                                    longestSQ=dist;
-                                    count = 0;
-                                }else{
-                                    if(++count > 5){
-                                        break;
-                                    }
-                                }
-                            }
-                            ++h;
-                        }
-                        padSection[majorX + (majorY+h)*dx] = {255,0,255,255};
-                    }
+                //Move second major radius guess onto pad
+                direction c_m1 = major1-center;
+                point major2Guess2;
+                if(!padSection.linearSearch(major2Guess,{c_m1.dx>0?1:-1,c_m1.dy>0?1:-1},major2Guess2,PAD_COLOR,TOLERANCE,{0,0,0,0})){break;}
 
-                    if(longestSQ > 0){
-                        accuracy = 2;
-                        calculatedDistance = (1.1159)*475.0/std::sqrt(longestSQ);
-                    }else{
-                        accuracy = 1;
-                        calculatedDistance = 475.0/(std::max(dx,dy));
-                    }
+                //Find better approximation of second major radius
+                point major2;
+                float r2Squared;
+                if(!padSection.traceBorder(major2Guess2,major1,!rMajor,false,checkCount,major2,r2Squared,BORDER_COLOR,TOLERANCE,{0,0,0,0})){break;}
 
-                }
+                //Find better approximation of first major radius
+                if(!padSection.traceBorder(major1,major2,rMajor,false,checkCount,major1,radiusSquared,BORDER_COLOR,TOLERANCE,{0,0,0,0})){break;}
 
-                //Save annotated screenshot of landing pad
+                //Calculate major diameter
+                calculatedDistance = (950.0/std::sqrt((major2-major1).magSq())) / std::tan(0.5*FOV);
+                accuracy = 2;
+                
                 if(controls::controls & controls::SS){
-                    stbi_write_png("landing_pad.png",dx,dy,4,padSection,4*dx);
+                    padSection.save("landing_pad");
                 }
+                break;
+            }
+            if(accuracy == 1){
+                calculatedDistance = (950.0/(std::max(dx,dy))) / std::tan(0.5*FOV);
             }
             double lenActual = std::sqrt(pos.x*pos.x+pos.y*pos.y+pos.z*pos.z);
             switch(accuracy){
+                case -1:break;
                 case 0:{
                     std::cout << "Distance (calculated/actual): NA / " << lenActual << std::endl;
                 }break;

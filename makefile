@@ -2,7 +2,6 @@ INCLUDE = -I include/ -I vendor/ -I vendor/GLAD/include/ -I vendor/glm/ -I vendo
 LIB = vendor/graphicsLibrary/lib/graphicsLib.lib
 DLL = bin/glfw3.dll
 
-
 build: src/main.cpp .o/glad.o
 	g++ src/main.cpp -o bin/main.exe $(INCLUDE) $(LIB) $(DLL) .o/glad.o
 
